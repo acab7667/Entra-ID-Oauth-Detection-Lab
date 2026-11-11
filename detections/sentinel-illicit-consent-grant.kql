@@ -1,0 +1,66 @@
+// ============================================================================
+// Tajuk Peraturan : Microsoft Entra ID - Suspicious OAuth Application Consent Grant
+// Penulis         : Detection Engineering & SOC Lab Portfolio
+// Sumber Data     : Microsoft Entra ID (AuditLogs)
+// MITRE ATT&CK    : T1528 (Steal Application Access Token), T1098.003, T1550.001
+// Tahap Keterukan : High (Tinggi)
+// Penerangan      : Mengesan apabila pengguna memberikan kebenaran (consent) kepada
+//                   aplikasi OAuth yang meminta skop kebenaran berisiko tinggi
+//                   seperti akses membaca/menulis e-mel, fail, atau direktori.
+// ============================================================================
+
+let RiskyPermissions = dynamic([
+    "Mail.Read",
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "MailboxSettings.ReadWrite",
+    "Files.Read.All",
+    "Files.ReadWrite.All",
+    "Notes.ReadWrite.All",
+    "Directory.ReadWrite.All",
+    "RoleManagement.ReadWrite.Directory",
+    "AppRoleAssignment.ReadWrite.All"
+]);
+AuditLogs
+| where OperationName == "Consent to application"
+| where Result == "success"
+| extend InitiatedByUser = tostring(InitiatedBy.user.userPrincipalName)
+| extend UserDisplayName = tostring(InitiatedBy.user.displayName)
+| extend IpAddress = tostring(InitiatedBy.user.ipAddress)
+| extend AppDisplayName = tostring(TargetResources[0].displayName)
+| extend ServicePrincipalId = tostring(TargetResources[0].id)
+// Menguraikan array JSON di dalam TargetResources[0].modifiedProperties
+| mv-expand ModifiedProp = TargetResources[0].modifiedProperties
+| extend 
+    PropName = tostring(ModifiedProp.displayName),
+    PropValue = trim('"', tostring(ModifiedProp.newValue))
+| summarize 
+    PermissionsRaw = take_anyif(PropValue, PropName == "ConsentAction.Permissions"),
+    IsAdminConsent = take_anyif(PropValue, PropName == "ConsentContext.IsAdminConsent"),
+    OnBehalfOfAll = take_anyif(PropValue, PropName == "ConsentContext.OnBehalfOfAll"),
+    ServicePrincipalNames = take_anyif(PropValue, PropName == "TargetId.ServicePrincipalNames")
+    by TimeGenerated, InitiatedByUser, UserDisplayName, IpAddress, AppDisplayName, ServicePrincipalId, CorrelationId
+// Mengekstrak senarai Scope daripada rentetan ConsentAction.Permissions
+| extend GrantedScopes = extract("Scope:\\s*([^,\\]]+)", 1, PermissionsRaw)
+// Tapis hanya kebenaran yang mengandungi skop berisiko tinggi
+| where GrantedScopes has_any (RiskyPermissions)
+// (Pilihan) Fokus kepada kelulusan yang dibuat oleh pengguna biasa (bukan Admin)
+// | where IsAdminConsent == "False"
+| extend
+    AccountName = tostring(split(InitiatedByUser, "@")[0]),
+    UPNSuffix = tostring(split(InitiatedByUser, "@")[1])
+| project
+    TimeGenerated,
+    InitiatedByUser,
+    UserDisplayName,
+    IpAddress,
+    AppDisplayName,
+    GrantedScopes,
+    IsAdminConsent,
+    OnBehalfOfAll,
+    ServicePrincipalId,
+    ServicePrincipalNames,
+    CorrelationId,
+    AccountName,
+    UPNSuffix
+| order by TimeGenerated desc
