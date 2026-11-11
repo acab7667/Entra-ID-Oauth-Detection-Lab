@@ -1,0 +1,41 @@
+title: Suspicious OAuth Application Consent Grant with High-Risk Permissions in Entra ID
+id: 7f8e9d1a-4c3b-4a2e-9b1c-8d7e6f5a4b3c
+status: experimental
+description: |
+  Detects when a user or administrator grants consent to an OAuth application in Microsoft Entra ID
+  requesting high-risk Microsoft Graph permissions (such as Mail.ReadWrite, Files.ReadWrite.All,
+  or RoleManagement.ReadWrite.Directory) commonly abused in Illicit Consent Grant (OAuth Phishing) attacks.
+references:
+  - https://learn.microsoft.com/en-us/defender-office-365/detect-and-remediate-illicit-consent-grants
+  - https://attack.mitre.org/techniques/T1528/
+author: Cybersecurity Portfolio Project (Detection Engineer & SOC Analyst)
+date: 2026-11-11
+tags:
+  - attack.credential-access
+  - attack.t1528
+  - attack.persistence
+  - attack.t1098.003
+  - attack.defense-evasion
+  - attack.t1550.001
+logsource:
+  product: azure
+  service: auditlogs
+detection:
+  selection_operation:
+    OperationName: 'Consent to application'
+    Result: 'success'
+  selection_risky_scopes:
+    TargetResources.modifiedProperties.newValue|contains:
+      - 'Mail.Read'
+      - 'Mail.ReadWrite'
+      - 'Mail.Send'
+      - 'MailboxSettings.ReadWrite'
+      - 'Files.ReadWrite.All'
+      - 'Directory.ReadWrite.All'
+      - 'RoleManagement.ReadWrite.Directory'
+      - 'AppRoleAssignment.ReadWrite.All'
+  condition: selection_operation and selection_risky_scopes
+falsepositives:
+  - Legitimate third-party enterprise applications approved by IT administrators.
+  - Known business productivity integrations (e.g., sanctioned CRM or backup tools).
+level: high
